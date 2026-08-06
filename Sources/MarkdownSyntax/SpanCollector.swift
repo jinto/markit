@@ -141,6 +141,25 @@ struct SpanCollector: MarkupWalker {
         append(kind, .marker, closeStart..<outer.upperBound)
     }
 
+    /// 리스트 항목의 마커(`- `, `1. `)는 항목 range 시작부터 첫 자식 시작까지다.
+    /// 내용 스팬은 내지 않는다 — 리스트 항목의 본문은 그냥 문단이므로
+    /// 별도 스타일이 필요 없다.
+    mutating func visitListItem(_ listItem: ListItem) {
+        if let outer = utf16Range(listItem.range),
+           let firstChild = listItem.children.compactMap({ utf16Range($0.range) }).first {
+            append(.listItemMarker, .marker, outer.lowerBound..<firstChild.lowerBound)
+        }
+        descendInto(listItem)
+    }
+
+    mutating func visitBlockQuote(_ blockQuote: BlockQuote) {
+        if let outer = utf16Range(blockQuote.range),
+           let firstChild = blockQuote.children.compactMap({ utf16Range($0.range) }).first {
+            append(.blockQuote, .marker, outer.lowerBound..<firstChild.lowerBound)
+        }
+        descendInto(blockQuote)
+    }
+
     private static let backtick = UInt16(UnicodeScalar("`").value)
     private static let tilde = UInt16(UnicodeScalar("~").value)
     private static let newline = UInt16(UnicodeScalar("\n").value)

@@ -128,6 +128,32 @@ final class SpanCollectorTests: XCTestCase {
         }.isEmpty)
     }
 
+    // MARK: - 리스트와 인용
+
+    func testUnorderedListMarker() {
+        let result = spans("- item one\n- item two")
+        XCTAssertEqual(ranges(result) { $0.kind == .listItemMarker && $0.role == .marker },
+                       [0..<2, 11..<13])
+    }
+
+    func testOrderedListMarker() {
+        let result = spans("1. first\n2. second")
+        XCTAssertEqual(ranges(result) { $0.kind == .listItemMarker && $0.role == .marker },
+                       [0..<3, 9..<12])
+    }
+
+    func testBlockQuoteMarker() {
+        let result = spans("> quoted")
+        XCTAssertEqual(ranges(result) { $0.kind == .blockQuote && $0.role == .marker },
+                       [0..<2])
+    }
+
+    func testKoreanListItem() {
+        let result = spans("- 한글 항목")
+        XCTAssertEqual(ranges(result) { $0.kind == .listItemMarker && $0.role == .marker },
+                       [0..<2])
+    }
+
     // MARK: - 일반
 
     /// 빈 마커 범위는 버려야 한다. Setext 헤딩은 여는 마커가 없다.
