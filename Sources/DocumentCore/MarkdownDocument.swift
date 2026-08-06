@@ -7,6 +7,17 @@ public enum SaveOutcome: Equatable {
     case recreated
 }
 
+/// 열어 둔 파일이 외부에서 바뀌었을 때 무슨 일이 있었는지.
+public enum ExternalChange: Equatable {
+    /// 버퍼가 clean이어서 자동으로 리로드했다. 알림만 하면 된다.
+    /// 에이전트 협업의 기본 경로다.
+    case reloaded
+    /// 버퍼가 dirty라 자동 리로드하지 않았다. 사용자가 골라야 한다.
+    case conflict(diskText: String)
+    /// 파일이 사라졌다. 버퍼는 그대로 남는다.
+    case fileDisappeared
+}
+
 /// 마크다운 파일 하나의 상태.
 ///
 /// 설계 문서 AD-2에 따라 **버퍼가 곧 파일 내용이다.** 파싱하거나 재직렬화하지 않으므로
@@ -71,5 +82,60 @@ public final class MarkdownDocument {
         }
         savedText = text
         return existed ? .saved : .recreated
+    }
+
+    // MARK: - 외부 변경 감시
+
+    public var onExternalChange: ((ExternalChange) -> Void)?
+    private var watcher: FileWatching?
+
+    public func beginWatching(with watcher: FileWatching) {
+        guard let url else { return }
+        self.watcher = watcher
+        watcher.startWatching(url) { [weak self] in
+            self?.handleFileSystemChange()
+        }
+    }
+
+    public func stopWatching() {
+        watcher?.stopWatching()
+        watcher = nil
+    }
+
+    /// 충돌 대화에서 사용자가 디스크 버전을 택했을 때.
+    ///
+    /// "내 것 유지"에 대응하는 메서드는 없다 — 버퍼를 그대로 두면 dirty로 남고
+    /// 다음 저장이 디스크를 덮어쓰므로 별도 동작이 필요 없다.
+    public func acceptDiskVersion(_ diskText: String) {
+        text = diskText
+        savedText = diskText
+    }
+
+    /// 충돌 정책의 전부. 설계 문서의 표를 그대로 구현한다.
+    private func handleFileSystemChange() {
+        guard let url else { return }
+
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            onExternalChange?(.fileDisappeared)
+            return
+        }
+
+        // 읽을 수 없으면(잘못된 UTF-8, 일시적 상태) 버퍼를 건드리지 않는다.
+        guard let diskText = try? Self.readText(from: url) else { return }
+
+        // 디스크가 버퍼와 같으면 알릴 게 없다. 이 한 줄이 자기 저장의 메아리와
+        // 에이전트가 같은 내용을 쓴 경우를 모두 처리한다.
+        if diskText == text {
+            savedText = diskText
+            return
+        }
+
+        if isDirty {
+            onExternalChange?(.conflict(diskText: diskText))
+        } else {
+            text = diskText
+            savedText = diskText
+            onExternalChange?(.reloaded)
+        }
     }
 }
