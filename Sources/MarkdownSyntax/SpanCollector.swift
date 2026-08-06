@@ -14,12 +14,15 @@ import Markdown
 struct SpanCollector: MarkupWalker {
 
     private let offsetMap: SourceOffsetMap
-    private let source: String
+    /// 원문의 UTF-16 코드 유닛. `InlineCode`/`CodeBlock`의 델리미터를 세는 데 쓴다.
+    /// 방문할 때마다 `Array(source.utf16)`를 만들면 노드 수에 비례해 O(n²)이 되므로
+    /// 한 번만 만들어 둔다.
+    private let utf16Units: [UInt16]
     private(set) var spans: [StyleSpan] = []
 
     init(offsetMap: SourceOffsetMap, source: String) {
         self.offsetMap = offsetMap
-        self.source = source
+        self.utf16Units = Array(source.utf16)
     }
 
     mutating func collect(from document: Document) -> [StyleSpan] {
@@ -84,4 +87,61 @@ struct SpanCollector: MarkupWalker {
         appendContainer(.link(destination: link.destination), link)
         descendInto(link)
     }
+
+    /// `InlineCode`는 자식이 없어서 차집합 규칙을 쓸 수 없다.
+    /// 원문에서 백틱 런의 길이를 직접 세어 델리미터를 가른다.
+    mutating func visitInlineCode(_ inlineCode: InlineCode) {
+        guard let outer = utf16Range(inlineCode.range),
+              outer.upperBound <= utf16Units.count else { return }
+
+        var fence = 0
+        while outer.lowerBound + fence < outer.upperBound,
+              utf16Units[outer.lowerBound + fence] == Self.backtick {
+            fence += 1
+        }
+        guard fence > 0, outer.count > fence * 2 else {
+            append(.inlineCode, .content, outer)
+            return
+        }
+
+        append(.inlineCode, .marker, outer.lowerBound..<(outer.lowerBound + fence))
+        append(.inlineCode, .content, (outer.lowerBound + fence)..<(outer.upperBound - fence))
+        append(.inlineCode, .marker, (outer.upperBound - fence)..<outer.upperBound)
+    }
+
+    /// `CodeBlock`도 자식이 없다. 펜스가 있으면 첫 줄과 마지막 줄이 마커다.
+    /// 들여쓰기 코드블록에는 펜스가 없으므로 전체가 내용이다.
+    mutating func visitCodeBlock(_ codeBlock: CodeBlock) {
+        guard let outer = utf16Range(codeBlock.range),
+              outer.upperBound <= utf16Units.count,
+              !outer.isEmpty else { return }
+        let kind = StyleSpan.Kind.codeBlock(language: codeBlock.language)
+
+        let opener = utf16Units[outer.lowerBound]
+        guard opener == Self.backtick || opener == Self.tilde else {
+            append(kind, .content, outer)  // 들여쓰기 코드블록
+            return
+        }
+
+        // 여는 펜스는 첫 줄 끝(개행 포함)까지.
+        var openEnd = outer.lowerBound
+        while openEnd < outer.upperBound, utf16Units[openEnd] != Self.newline { openEnd += 1 }
+        if openEnd < outer.upperBound { openEnd += 1 }  // 개행 포함
+
+        // 닫는 펜스는 마지막 개행 뒤부터. 없으면 닫는 펜스가 없는 것이다.
+        var closeStart = outer.upperBound
+        var i = outer.upperBound - 1
+        while i >= openEnd {
+            if utf16Units[i] == Self.newline { closeStart = i + 1; break }
+            i -= 1
+        }
+
+        append(kind, .marker, outer.lowerBound..<openEnd)
+        append(kind, .content, openEnd..<closeStart)
+        append(kind, .marker, closeStart..<outer.upperBound)
+    }
+
+    private static let backtick = UInt16(UnicodeScalar("`").value)
+    private static let tilde = UInt16(UnicodeScalar("~").value)
+    private static let newline = UInt16(UnicodeScalar("\n").value)
 }

@@ -85,6 +85,49 @@ final class SpanCollectorTests: XCTestCase {
         }, [0..<1, 5..<27])
     }
 
+    // MARK: - 코드 (자식이 없는 노드)
+
+    func testInlineCodeSingleBacktick() {
+        let result = spans("a `code` b")
+        XCTAssertEqual(ranges(result) { $0.kind == .inlineCode && $0.role == .marker },
+                       [2..<3, 7..<8])
+        XCTAssertEqual(span(result, kind: .inlineCode, role: .content)?.range, 3..<7)
+    }
+
+    func testInlineCodeDoubleBacktick() {
+        let result = spans("a ``co`de`` b")
+        XCTAssertEqual(ranges(result) { $0.kind == .inlineCode && $0.role == .marker },
+                       [2..<4, 9..<11])
+        XCTAssertEqual(span(result, kind: .inlineCode, role: .content)?.range, 4..<9)
+    }
+
+    func testFencedCodeBlockCapturesLanguageAndFences() {
+        let result = spans("```swift\nlet x = 1\n```")
+        let content = result.first {
+            if case .codeBlock = $0.kind, $0.role == .content { return true }
+            return false
+        }
+        guard case .codeBlock(let lang)? = content?.kind else {
+            return XCTFail("expected codeBlock kind")
+        }
+        XCTAssertEqual(lang, "swift")
+        XCTAssertEqual(content?.range, 9..<19)  // "let x = 1\n"
+
+        // "```swift\n" 와 "```"
+        XCTAssertEqual(ranges(result) {
+            if case .codeBlock = $0.kind, $0.role == .marker { return true }
+            return false
+        }, [0..<9, 19..<22])
+    }
+
+    func testIndentedCodeBlockHasNoFenceMarkers() {
+        let result = spans("    indented\n")
+        XCTAssertTrue(ranges(result) {
+            if case .codeBlock = $0.kind, $0.role == .marker { return true }
+            return false
+        }.isEmpty)
+    }
+
     // MARK: - 일반
 
     /// 빈 마커 범위는 버려야 한다. Setext 헤딩은 여는 마커가 없다.
