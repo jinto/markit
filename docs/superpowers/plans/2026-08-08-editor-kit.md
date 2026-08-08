@@ -143,6 +143,57 @@ setAttributedString      :  0.4 ms
 임계값을 숫자로 남겨 둔다: **이 표에서 32KB가 손익분기점이다.** 증분 재파싱을 언제 해야
 하는지 묻는 미래의 우리에게 답이 된다.
 
+### 8. `NSTextStorage`는 글자를 못 그리는 폰트를 조용히 치환한다 — 한글에 이탤릭·고정폭이 없다
+
+Task 2 구현 중에 테스트 2개가 실패해서 파헤친 결과다. 지정한 폰트가 아니라 다른 폰트가
+들어 있었다.
+
+```
+지정: mono   = .AppleSystemUIFontMonospaced-Regular (fixed=true)
+지정: italic = .SFNS-RegularItalic (italic=true)
+
+내용이 ASCII("code") → 그대로 유지
+내용이 한글("코드")   → 둘 다 .AppleSDGothicNeoI-Regular 로 치환
+                        fixed=false, italic=false  ← 트레이트가 사라진다
+```
+
+비트맵으로 그려서 픽셀을 비교하면 더 분명하다:
+
+```
+한글 + 이탤릭 폰트  vs 보통 폰트 : 픽셀까지 동일   ← 이탤릭이 아예 없다
+한글 + obliqueness vs 보통 폰트 : 다름           ← 전단은 먹는다
+```
+
+macOS에 한글을 그릴 수 있는 고정폭 시스템 폰트가 없다:
+
+| 폰트 | 고정폭 | 한글 |
+|---|---|---|
+| Menlo | O | X |
+| Monaco | O | X |
+| SF Mono / D2Coding | 설치돼 있지 않음 | — |
+| Apple SD Gothic Neo | X | O |
+
+**결과 (한글 마크다운 에디터에서 이건 사소한 문제가 아니다):**
+
+- **강조(`*기울임*`)는 아무 표시도 없이 사라진다.** 그래서 폰트가 그 구간의 글자를 못 그릴 때
+  `.obliqueness`로 직접 기울인다. ASCII에는 진짜 이탤릭이 있으므로 덧붙이면 두 번
+  기울어진다 — 커버리지를 확인해서 필요한 구간에만 준다
+- **한글 인라인 코드는 고정폭으로 보이지 않는다.** 배경색이 유일한 신호다.
+  나중에 한글 코딩 폰트를 번들하면 해결되지만 v1의 범위가 아니다
+- **굵게(`**굵게**`)는 한글에서도 살아남는다** (`AppleSDGothicNeo-Bold`로 치환되면서 굵기
+  트레이트를 유지한다). 대책이 필요 없다
+
+### 9. 치환은 `endEditing`에서 일어나므로 "적용 후 읽어서 보정"이 불가능하다
+
+```
+beginEditing 안에서 읽으면 : .SFNS-RegularItalic  italic=true    ← 치환이 아직 안 보인다
+endEditing 후에 읽으면     : .AppleSDGothicNeoI-Regular italic=false
+```
+
+우리의 스타일링 패스는 전체를 `beginEditing`/`endEditing`으로 묶으므로 (사실 6번), 블록
+안에서 되읽어 확인하는 방법은 통하지 않는다. **`NSFont.coveredCharacterSet`으로 미리
+판단해야 한다.**
+
 ## 마커 노출 정책: 줄 기준
 
 커서가 어디 있을 때 마커를 보여줄 것인가. **커서가 있는 줄의 마커를 모두 노출한다.**
