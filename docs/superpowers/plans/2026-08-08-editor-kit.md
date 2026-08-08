@@ -53,6 +53,22 @@ layoutManager 접근 후      → textLayoutManager: false  ← 강등
 
 `textStorage`는 안전하다는 게 중요하다 — 스타일링 경로 전체가 `textStorage`를 쓴다.
 
+**Task 3에서 변이 테스트로 알아낸 단서 (처음 판단이 불완전했다):** 강등은 **초기화가 끝난
+뒤의 접근에서만** 일어난다. `init` 안에서 `layoutManager`를 읽어도 강등되지 않는다.
+
+```
+init 안에서 _ = layoutManager        → textLayoutManager 살아 있음 (테스트 통과)
+restyleNow() 안에서 _ = layoutManager → textLayoutManager nil    (테스트 실패 ✓)
+```
+
+그래서 `testUsesTextKit2AfterConstruction` 하나만으로는 **가드가 되지 않는다.**
+실제로 지키는 것은 타이핑·재스타일을 거친 뒤에 확인하는
+`testUsesTextKit2AfterTypingAndRestyling`이다. 위험이 사는 곳이 운영 경로이므로 결과적으로는
+맞지만, 생성 시점만 확인하는 테스트를 가드라고 믿었다면 놓쳤을 것이다.
+
+수동 조립 스택(`init(frame:textContainer:)`)도 편의 이니셜라이저와 똑같이 강등된다 —
+조립 방식이 면역을 주지는 않는다.
+
 ### 3. 마커를 "숨기는" 세 방법 중 쓸 수 있는 것은 하나뿐이다
 
 원문 `**굵게**`(6 유닛)에서 `**` 4개를 사라져 보이게 하는 실험. 목표 폭은 `굵게`만
