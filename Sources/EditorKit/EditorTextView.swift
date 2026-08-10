@@ -14,6 +14,17 @@ public final class EditorTextView: NSTextView {
         didSet { restyleNow() }
     }
 
+    /// 마커를 접을지 말지. WYSIWYG 모드와 소스 모드의 차이는 이것뿐이다.
+    public var markerPolicy: MarkerPolicy = .hideWhenInactive {
+        didSet { restyleNow() }
+    }
+
+    /// 분할 모드 오른쪽의 읽기 전용 프리뷰인가.
+    ///
+    /// 프리뷰는 **파생물이고 저장 경로에 닿지 않는다.** 그래서 `onTextChange`를 부르지
+    /// 않고, 커서 개념도 없는 것으로 취급해 마커를 항상 접는다.
+    private(set) var isPreview = false
+
     /// 사용자 편집으로 원문이 바뀔 때 불린다. `setMarkdown(_:)`으로 바뀔 때는 부르지 않는다.
     public var onTextChange: ((String) -> Void)?
 
@@ -65,6 +76,19 @@ public final class EditorTextView: NSTextView {
         fatalError("EditorTextView는 코드로만 만든다")
     }
 
+    /// 분할 모드 오른쪽에 놓을 읽기 전용 프리뷰.
+    ///
+    /// 프리뷰가 별도의 뷰여야 하는 이유: 하나의 `NSTextContentStorage`에 뷰 둘을 붙이면
+    /// `NSTextStorage`가 공유되어 **스타일을 다르게 줄 수 없다** (프로브로 확인). 마커를
+    /// 한쪽만 접는 것이 불가능하다.
+    public static func makePreview(theme: Theme = .default) -> EditorTextView {
+        let view = EditorTextView(theme: theme)
+        view.isPreview = true
+        view.isEditable = false
+        view.markerPolicy = .hideAlways
+        return view
+    }
+
     // MARK: - 원문 교체
 
     /// 원문을 통째로 갈아끼운다. 파일 열기와 외부 변경 리로드가 쓴다.
@@ -104,9 +128,8 @@ public final class EditorTextView: NSTextView {
 
         restylePassCountForTesting += 1
         let spans = MarkdownSyntaxMap.build(from: storage.string)
-        LiveStyleApplier(theme: theme).apply(spans: spans,
-                                            selection: selectedRange(),
-                                            to: storage)
+        LiveStyleApplier(theme: theme, markerPolicy: markerPolicy).apply(
+            spans: spans, selection: selectedRange(), to: storage)
         activeLine = lineRange(for: selectedRange(), in: storage)
     }
 
@@ -143,7 +166,9 @@ extension EditorTextView: NSTextStorageDelegate {
                             range: NSRange,
                             changeInLength delta: Int) {
         guard actions.contains(.editedCharacters) else { return }
-        if !isProgrammaticChange {
+        // 프리뷰는 파생물이므로 어떤 변경도 원문 변경으로 보고하지 않는다. 보고하면
+        // 파생물이 저장 경로에 닿아 무손실 왕복이 깨진다.
+        if !isProgrammaticChange && !isPreview {
             onTextChange?(storage.string)
         }
         // 여기서 바로 스타일을 입히지 않는다. 지금은 스토리지의 편집 처리 안이고,

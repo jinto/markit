@@ -7,12 +7,27 @@ import MarkdownSyntax
 /// 여기만 고치면 되고, `NSTextView` 없이 맨 `NSTextStorage`로 테스트할 수 있다.
 ///
 /// 원문은 절대 변형하지 않는다 (AD-2). 이 파일에 `replaceCharacters`가 등장하면 버그다.
+/// 마커를 접을지 말지.
+///
+/// WYSIWYG 모드와 소스 모드가 **같은 파이프라인을 쓰면서 이것만 갈아끼운다.** 모드 전환이
+/// 문서 변환이 아니라 표시 정책 변경일 뿐이라는 AD-2의 이득이 여기서 실현된다.
+public enum MarkerPolicy {
+    /// 커서가 없는 줄의 마커를 접는다. 라이브 프리뷰 — WYSIWYG 모드.
+    case hideWhenInactive
+    /// 모든 마커를 노출한다. 구문 색만 입힌 원문 — 소스 모드.
+    case revealAll
+    /// 커서와 무관하게 접는다. 읽기 전용 프리뷰 — 커서 개념이 없다.
+    case hideAlways
+}
+
 public struct LiveStyleApplier {
 
     public let theme: Theme
+    public let markerPolicy: MarkerPolicy
 
-    public init(theme: Theme = .default) {
+    public init(theme: Theme = .default, markerPolicy: MarkerPolicy = .hideWhenInactive) {
         self.theme = theme
+        self.markerPolicy = markerPolicy
     }
 
     /// 커서가 있는 **줄**의 마커를 노출한다.
@@ -88,8 +103,14 @@ public struct LiveStyleApplier {
 
     private func applyMarker(_ kind: StyleSpan.Kind, _ range: NSRange,
                              activeLine: NSRange, to storage: NSTextStorage) {
-        let onActiveLine = NSIntersectionRange(range, activeLine).length > 0
-        if Self.isHidable(kind) && !onActiveLine {
+        let reveals: Bool
+        switch markerPolicy {
+        case .revealAll: reveals = true
+        case .hideAlways: reveals = false
+        case .hideWhenInactive: reveals = NSIntersectionRange(range, activeLine).length > 0
+        }
+
+        if !reveals && Self.isHidable(kind) {
             // 글자를 지우지 않고 폭만 없앤다. 원문과 레이아웃에 남아 있어야 캐럿
             // 좌표계가 하나로 유지된다 (계획서 사실 4번).
             storage.addAttribute(.font,

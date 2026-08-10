@@ -207,6 +207,30 @@ final class LiveStyleApplierTests: XCTestCase {
         XCTAssertEqual(storage.string, source)
     }
 
+    // MARK: - 정책 교체 (소스 모드)
+
+    func testRevealAllPolicyNeverHidesMarkers() {
+        let source = "**굵게**\n둘째 줄"
+        let storage = NSTextStorage(string: source)
+        LiveStyleApplier(markerPolicy: .revealAll).apply(
+            spans: MarkdownSyntaxMap.build(from: source),
+            selection: NSRange(location: offset(of: "둘째", in: source), length: 0),
+            to: storage)
+        XCTAssertFalse(isHidden(storage, at: 0), "소스 모드에서는 커서가 멀어도 마커가 보인다")
+        XCTAssertFalse(isHidden(storage, at: 4))
+    }
+
+    /// 노출한다고 본문색으로 두면 마커가 내용을 방해한다. 구문 색은 유지해야 한다.
+    func testRevealAllStillDimsMarkers() {
+        let source = "**굵게**"
+        let storage = NSTextStorage(string: source)
+        LiveStyleApplier(markerPolicy: .revealAll).apply(
+            spans: MarkdownSyntaxMap.build(from: source),
+            selection: NSRange(location: 100, length: 0), to: storage)
+        XCTAssertEqual(storage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor,
+                       Theme.default.markerColor)
+    }
+
     func testEmptyDocumentDoesNotCrash() {
         let storage = NSTextStorage(string: "")
         applier.apply(spans: [], selection: NSRange(location: 0, length: 0), to: storage)

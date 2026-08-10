@@ -27,6 +27,26 @@ final class EditorTextViewTests: XCTestCase {
         (source as NSString).range(of: needle).location
     }
 
+    /// 배치된 줄 수와 가장 넓은 줄의 폭. 속성이 아니라 기하를 본다.
+    private func layout(_ v: EditorTextView) -> (lines: Int, widest: CGFloat) {
+        guard let tlm = v.textLayoutManager else { return (-1, -1) }
+        tlm.ensureLayout(for: tlm.documentRange)
+        var lines = 0
+        var widest = 0.0
+        tlm.enumerateTextLayoutFragments(from: tlm.documentRange.location,
+                                         options: [.ensuresLayout]) { fragment in
+            for line in fragment.textLineFragments {
+                lines += 1
+                widest = max(widest, line.typographicBounds.width)
+            }
+            return true
+        }
+        return (lines, widest)
+    }
+
+    private static let longKorean =
+        String(repeating: "이것은 줄바꿈이 필요한 긴 한글 문장입니다. ", count: 12)
+
     // MARK: - TextKit 2 회귀 방어
 
     /// `layoutManager`를 어디선가 읽으면 조용히 TextKit 1으로 강등된다. 예외도 경고도
@@ -183,5 +203,88 @@ final class EditorTextViewTests: XCTestCase {
     func testDelegateIsAvailableToOwner() {
         let v = view("# 제목")
         XCTAssertNil(v.delegate, "델리게이트 자리는 상위에게 비워 둬야 한다")
+    }
+
+    // MARK: - 줄바꿈
+
+    /// `NSTextContainer` 폭 0은 "무제한"이다. 이 설정이 깨지면 긴 문서가 한 줄로 누워
+    /// 3140pt 폭이 된다. 속성만 보는 테스트로는 절대 잡히지 않으므로 기하를 직접 본다.
+    func testLongTextWrapsWithinContainerWidth() {
+        let v = view()
+        v.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        v.setMarkdown(Self.longKorean)
+
+        let (lines, widest) = layout(v)
+        XCTAssertGreaterThan(lines, 1, "긴 텍스트가 여러 줄로 나뉘어야 한다")
+        XCTAssertLessThanOrEqual(widest, 410, "줄이 컨테이너를 넘으면 가로 스크롤이 생긴다")
+    }
+
+    func testWrappingFollowsWidthChange() {
+        let v = view()
+        v.frame = NSRect(x: 0, y: 0, width: 300, height: 300)
+        v.setMarkdown(Self.longKorean)
+        let narrow = layout(v).lines
+
+        v.frame = NSRect(x: 0, y: 0, width: 700, height: 300)
+        XCTAssertLessThan(layout(v).lines, narrow, "넓히면 줄 수가 줄어야 한다")
+    }
+
+    // MARK: - 마커 정책
+
+    func testSourcePolicyRevealsMarkersOffActiveLine() {
+        let v = view("**굵게**\n둘째 줄")
+        v.markerPolicy = .revealAll
+        v.setSelectedRange(NSRange(location: offset(of: "둘째", in: v.string), length: 0))
+        v.restyleNow()
+        XCTAssertFalse(isHidden(v, at: 0), "소스 모드에서는 커서가 멀어도 마커가 보인다")
+    }
+
+    func testChangingMarkerPolicyRestylesImmediately() {
+        let source = "**굵게**\n둘째 줄"
+        let v = view(source)
+        v.setSelectedRange(NSRange(location: offset(of: "둘째", in: source), length: 0))
+        v.restyleNow()
+        XCTAssertTrue(isHidden(v, at: 0))
+
+        v.markerPolicy = .revealAll
+        XCTAssertFalse(isHidden(v, at: 0), "정책을 바꾸면 즉시 반영돼야 한다")
+    }
+
+    // MARK: - 프리뷰 (분할 모드의 오른쪽)
+
+    func testPreviewIsNotEditable() {
+        XCTAssertFalse(EditorTextView.makePreview().isEditable,
+                       "프리뷰가 편집 가능하면 두 버퍼가 갈라진다")
+    }
+
+    /// 프리뷰는 파생물이다. 저장 경로에 닿으면 무손실 왕복이 깨진다.
+    func testPreviewNeverReportsTextChange() {
+        let preview = EditorTextView.makePreview()
+        var fired = 0
+        preview.onTextChange = { _ in fired += 1 }
+        preview.setMarkdown("에이전트가 쓴 내용")
+        preview.insertText("x", replacementRange: NSRange(location: 0, length: 0))
+        XCTAssertEqual(fired, 0)
+    }
+
+    func testPreviewHidesMarkersRegardlessOfCaret() {
+        let preview = EditorTextView.makePreview()
+        preview.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        preview.setMarkdown("**굵게**\n둘째 줄")
+        preview.setSelectedRange(NSRange(location: 1, length: 0))
+        preview.restyleNow()
+        XCTAssertTrue(isHidden(preview, at: 0),
+                      "프리뷰에는 커서 개념이 없다 — 항상 접혀 있어야 한다")
+    }
+
+    func testPreviewStillStylesContent() {
+        // 마커만 접고 끝나면 프리뷰가 아니다. 내용 스타일은 살아 있어야 한다.
+        let preview = EditorTextView.makePreview()
+        preview.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        preview.setMarkdown("# 제목\n\n본문")
+        let titleSize = (preview.textStorage?.attribute(
+            .font, at: offset(of: "제목", in: preview.string),
+            effectiveRange: nil) as? NSFont)?.pointSize ?? -1
+        XCTAssertGreaterThan(titleSize, Theme.default.bodyFont.pointSize)
     }
 }
