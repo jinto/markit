@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "MarkdownSyntax", targets: ["MarkdownSyntax"]),
         .library(name: "DocumentCore", targets: ["DocumentCore"]),
         .library(name: "EditorKit", targets: ["EditorKit"]),
+        .library(name: "AppCore", targets: ["AppCore"]),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-markdown", from: "0.6.0"),
@@ -39,6 +40,13 @@ let package = Package(
         .testTarget(
             name: "EditorKitTests",
             dependencies: ["EditorKit"]
+        ),
+        // 조립 층. EditorKit과 DocumentCore를 아는 유일한 곳이다. 두 레이어는 서로를
+        // 모른 채 남는다. SwiftUI를 쓰지 않으므로 조립 전체가 `swift test`로 검증된다.
+        .target(name: "AppCore", dependencies: ["EditorKit", "DocumentCore"]),
+        .testTarget(
+            name: "AppCoreTests",
+            dependencies: ["AppCore"]
         ),
     ]
 )
