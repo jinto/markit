@@ -48,5 +48,7 @@ let package = Package(
             name: "AppCoreTests",
             dependencies: ["AppCore"]
         ),
+        // SwiftUI 껍데기. 로직을 두지 않는다 — 여기만 자동 검증이 불가능하기 때문이다.
+        .executableTarget(name: "MarkitApp", dependencies: ["AppCore"]),
     ]
 )
