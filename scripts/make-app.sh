@@ -88,7 +88,7 @@ $ICON_KEY
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright © 2026 JAE KWON PARK. Apache-2.0.</string>
+	<string>Copyright © 2026 박제권 (Jay Park). MIT License.</string>
 </dict>
 </plist>
 PLIST
