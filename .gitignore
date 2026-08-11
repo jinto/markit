@@ -17,3 +17,6 @@ Package.resolved
 # LLVM coverage artifacts
 *.profraw
 *.profdata
+
+# 배포 산출물 (scripts/make-app.sh, scripts/make-dmg.sh)
+dist/

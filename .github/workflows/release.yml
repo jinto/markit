@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # 태그를 만들지 않고도 서명·공증 설정이 맞는지 확인할 수 있게 둔다.
+  # 이 경로는 릴리스를 만들지 않고 DMG를 워크플로 아티팩트로만 올린다.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '시험 빌드 버전'
+        default: '0.0.0-test'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 버전 결정
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 깨진 빌드를 배포하지 않는다. 실패하면 여기서 멈춘다.
+      - name: 테스트
+        run: swift test
+
+      - name: 서명 키체인 준비
+        env:
+          CERT_BASE64: ${{ secrets.DEVELOPER_ID_CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          if [ -z "$CERT_BASE64" ]; then
+            echo "::error::DEVELOPER_ID_CERT_BASE64 시크릿이 없다. docs/release.md 참조." && exit 1
+          fi
+          KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
+          security create-keychain -p "" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "" "$KEYCHAIN_PATH"
+          echo "$CERT_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          # 이것이 없으면 codesign이 개인키를 못 읽어 errSecInternalComponent로 실패한다.
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      # 식별자를 하드코딩하지 않고 키체인에서 찾는다. 이름이 바뀌어도 따라가고,
+      # 잘못된 종류의 인증서(Apple Development / Apple Distribution)를 올린 경우를
+      # 여기서 분명하게 잡는다 — 그 둘로는 공증이 되지 않는다.
+      - name: 서명 식별자 확인
+        id: identity
+        run: |
+          FOUND=$(security find-identity -v -p codesigning \
+            | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.*)".*/\1/')
+          if [ -z "$FOUND" ]; then
+            echo "::error::'Developer ID Application' 인증서가 없다. 키체인에 있는 것:"
+            security find-identity -v -p codesigning || true
+            exit 1
+          fi
+          echo "발견: $FOUND"
+          echo "value=$FOUND" >> "$GITHUB_OUTPUT"
+
+      - name: 앱 번들 빌드와 서명
+        env:
+          CODESIGN_IDENTITY: ${{ steps.identity.outputs.value }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: scripts/make-app.sh "${{ steps.version.outputs.value }}"
+
+      - name: 공증
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          APP="dist/Markit.app"
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/Markit.zip"
+
+          set +e
+          OUT=$(xcrun notarytool submit "$RUNNER_TEMP/Markit.zip" \
+            --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" \
+            --team-id "$TEAM_ID" --wait 2>&1)
+          CODE=$?
+          set -e
+          echo "$OUT"
+
+          SUBMISSION_ID=$(echo "$OUT" | grep -E '^ *id:' | head -1 | awk '{print $2}')
+          STATUS=$(echo "$OUT" | grep -E '^ *status:' | tail -1 | awk '{print $2}')
+
+          # 상태를 명시적으로 확인한다. 종료 코드를 무시하고 넘기면 공증되지 않은
+          # 앱이 릴리스에 올라간다 — 사용자에게는 "손상되었다"는 경고로 나타난다.
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "::error::공증 실패 (status=$STATUS, exit=$CODE)"
+            if [ -n "$SUBMISSION_ID" ]; then
+              echo "--- 공증 로그 ---"
+              xcrun notarytool log "$SUBMISSION_ID" \
+                --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" \
+                --team-id "$TEAM_ID" || true
+            fi
+            exit 1
+          fi
+
+          xcrun stapler staple "$APP"
+          # 네트워크 없이도 Gatekeeper를 통과하는지 확인한다. 스테이플이 실제로
+          # 붙었는지는 이것으로만 알 수 있다.
+          xcrun stapler validate "$APP"
+          spctl --assess --type execute --verbose=4 "$APP"
+
+      - name: DMG 생성
+        run: |
+          brew install create-dmg
+          scripts/make-dmg.sh "${{ steps.version.outputs.value }}"
+
+      - name: GitHub 릴리스에 업로드
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Markit-*.dmg
+          generate_release_notes: true
+
+      - name: 시험 빌드 아티팩트 업로드
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Markit-dmg
+          path: dist/Markit-*.dmg
+
+      - name: 키체인 정리
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
