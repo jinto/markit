@@ -1,7 +1,8 @@
 # Intent: macOS 네이티브 마크다운 에디터 (Markdowner 대응)
 
 - Date: 2026-08-06
-- Status: retroactive — spec.md/plan.md에서 2026-10-20 재구성
+- Status: partial — v1 출하 (Sources/ 5개 모듈, a037f17 앱 셸 + 95cb043 서명·DMG 2026-08-11); v2 mdner CLI·v3 내보내기 없음
+- Origin: retroactive — spec.md/plan.md에서 2026-10-20 재구성
 - Next: spec.md, plan-markdown-syntax-map.md, plan-document-core.md, plan-editor-kit.md, plan-app-shell.md
 
 ## Problem
