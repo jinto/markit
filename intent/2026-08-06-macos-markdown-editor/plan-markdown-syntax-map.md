@@ -4,7 +4,7 @@
 
 **Goal:** 마크다운 원문을 받아 라이브 스타일링에 필요한 범위 정보(`[StyleSpan]`)를 내는 순수 함수 레이어를 만든다. UI 없이 `swift test`로 전부 검증된다.
 
-**Architecture:** 설계 문서(`docs/superpowers/specs/2026-08-06-macos-markdown-editor-design.md`) AD-2에 따라 원문이 진실이다. 이 레이어는 원문을 **읽기만** 하고 절대 재직렬화하지 않는다. `swift-markdown`으로 AST를 얻고, AST 노드의 `SourceRange`(1-based line + **1-based UTF-8 byte column**)를 UTF-16 오프셋으로 환산해 `StyleSpan` 배열을 낸다.
+**Architecture:** 설계 문서(`intent/2026-08-06-macos-markdown-editor/spec.md`) AD-2에 따라 원문이 진실이다. 이 레이어는 원문을 **읽기만** 하고 절대 재직렬화하지 않는다. `swift-markdown`으로 AST를 얻고, AST 노드의 `SourceRange`(1-based line + **1-based UTF-8 byte column**)를 UTF-16 오프셋으로 환산해 `StyleSpan` 배열을 낸다.
 
 **Tech Stack:** Swift 5.9+, macOS 14+, `swiftlang/swift-markdown` (Apache-2.0), XCTest
 

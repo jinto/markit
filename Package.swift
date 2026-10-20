@@ -5,7 +5,7 @@ import PackageDescription
 //
 // The headless layers live here as library targets so they can be tested from
 // the command line with `swift test`, with no UI in the loop. The AppKit/SwiftUI
-// app target is added later (see docs/superpowers/specs) and depends on these.
+// app target is added later (see intent/2026-08-06-macos-markdown-editor/spec.md) and depends on these.
 let package = Package(
     name: "Markit",
     platforms: [.macOS(.v14)],
